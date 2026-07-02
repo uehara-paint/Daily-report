@@ -235,6 +235,16 @@
     font-size: 11px; cursor: pointer;
     display: flex; align-items: center; justify-content: center;
   }
+  .photo-uploading {
+    aspect-ratio: 1;
+    border-radius: 6px;
+    background: var(--bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    color: var(--text-sub);
+  }
 
   /* ── Buttons ── */
   .btn {
@@ -656,7 +666,7 @@
 
   <div class="card">
     <div class="card-title">📸 現場写真</div>
-    <div class="photo-zone" onclick="document.getElementById('photoInput').click()">
+    <div class="photo-zone">
       <div style="font-size:28px">📷</div>
       <div style="font-size:13px;color:var(--text-sub);margin-top:4px">タップして写真を追加</div>
       <input type="file" id="photoInput" accept="image/*" multiple onchange="addPhotos(event)">
@@ -856,16 +866,58 @@ function getWorkers() {
 }
 
 // ── Photos ───────────────────────────────────────
+// 写真は端末カメラ由来だと数MB単位になりやすく、そのままlocalStorageに
+// 溜め続けると容量オーバーで保存できなくなるため、Canvasで縮小・再圧縮してから保持する。
+const PHOTO_MAX_DIMENSION = 1280;
+const PHOTO_JPEG_QUALITY = 0.72;
+
 function addPhotos(e) {
-  Array.from(e.target.files).forEach(file => {
+  const files = Array.from(e.target.files);
+  if (!files.length) return;
+
+  files.forEach(file => {
+    if (!file.type.startsWith('image/')) return;
+    compressImage(file)
+      .then(dataUrl => {
+        photos.push(dataUrl);
+        renderPhotoGrid();
+      })
+      .catch(() => {
+        showToast('⚠️ 写真の読み込みに失敗しました：' + file.name);
+      });
+  });
+
+  // 同じ写真を連続で選び直せるように毎回リセットする
+  e.target.value = '';
+}
+
+function compressImage(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
     const reader = new FileReader();
+    reader.onerror = () => reject(new Error('read failed'));
     reader.onload = ev => {
-      photos.push(ev.target.result);
-      renderPhotoGrid();
+      img.onerror = () => reject(new Error('decode failed'));
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > PHOTO_MAX_DIMENSION || height > PHOTO_MAX_DIMENSION) {
+          const scale = PHOTO_MAX_DIMENSION / Math.max(width, height);
+          width = Math.round(width * scale);
+          height = Math.round(height * scale);
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', PHOTO_JPEG_QUALITY));
+      };
+      img.src = ev.target.result;
     };
     reader.readAsDataURL(file);
   });
 }
+
 function renderPhotoGrid() {
   const g = document.getElementById('photoGrid');
   g.innerHTML = photos.map((src, i) => `
@@ -908,7 +960,13 @@ function saveReport() {
   };
 
   reports.unshift(report);
-  localStorage.setItem('uehara_reports', JSON.stringify(reports));
+  try {
+    localStorage.setItem('uehara_reports', JSON.stringify(reports));
+  } catch (err) {
+    reports.shift(); // ロールバック
+    showToast('⚠️ 保存容量がいっぱいです。バックアップ保存→古い日報の削除をお願いします');
+    return;
+  }
   photos = [];
   renderPhotoGrid();
   renderHistory();
