@@ -569,7 +569,11 @@
     </div>
     <label>現場住所</label>
     <input type="text" id="siteAddress" placeholder="例：新潟県上越市○○町1-2-3">
-    <button class="btn btn-outline btn-sm" onclick="getCurrentLocation()">📡 現在地を取得</button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+      <button class="btn btn-outline btn-sm" onclick="getCurrentLocation()">📡 現在地を取得</button>
+      <button class="btn btn-outline btn-sm" onclick="geocodeAddress()">🔍 住所でピンを立てる</button>
+    </div>
+    <div style="font-size:11px;color:var(--text-sub);margin-top:-6px;margin-bottom:12px">地図を直接タップ、またはピンをドラッグして位置を微調整できます</div>
   </div>
 
   <div class="card">
@@ -743,6 +747,7 @@ let reports = JSON.parse(localStorage.getItem('uehara_reports') || '[]');
 let photos = [];
 let selectedWeather = '';
 let currentLat = null, currentLng = null;
+let writeMapMarker = null;
 let leafletMap = null, mainLeafletMap = null;
 
 // ── IndexedDB（写真保存用）─────────────────────────
@@ -853,6 +858,13 @@ function initWriteMap() {
   const lat = 37.15, lng = 138.24; // 上越市
   leafletMap = L.map('map').setView([lat, lng], 13);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap'}).addTo(leafletMap);
+  // 地図タップで手動ピン設置（住所検索や現在地の微調整用）
+  leafletMap.on('click', e => {
+    currentLat = e.latlng.lat;
+    currentLng = e.latlng.lng;
+    placeWriteMarker(currentLat, currentLng, '選択した位置（ドラッグで微調整できます）');
+    reverseGeocodeForWrite(currentLat, currentLng);
+  });
 }
 
 function initMainMap() {
@@ -879,25 +891,60 @@ function getCurrentLocation() {
   navigator.geolocation.getCurrentPosition(pos => {
     currentLat = pos.coords.latitude;
     currentLng = pos.coords.longitude;
-    const tag = document.getElementById('locationTag');
-    const txt = document.getElementById('locationText');
-    txt.textContent = `${currentLat.toFixed(4)}, ${currentLng.toFixed(4)}`;
-    tag.style.display = 'inline-flex';
-    if (leafletMap) {
-      leafletMap.setView([currentLat, currentLng], 15);
-      L.marker([currentLat, currentLng]).addTo(leafletMap)
-        .bindPopup('現在地').openPopup();
-    }
-    // Reverse geocode
-    fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${currentLat}&lon=${currentLng}`)
-      .then(r=>r.json()).then(d=>{
-        const addr = d.address;
-        const str = [addr.prefecture, addr.city||addr.town||addr.village, addr.road, addr.house_number]
-          .filter(Boolean).join('');
-        if (str) document.getElementById('siteAddress').value = str;
-        txt.textContent = str || `${currentLat.toFixed(4)}, ${currentLng.toFixed(4)}`;
-      }).catch(()=>{});
+    placeWriteMarker(currentLat, currentLng, '現在地（ドラッグで微調整できます）');
+    reverseGeocodeForWrite(currentLat, currentLng);
   }, ()=>{}, {enableHighAccuracy:true});
+}
+
+// 地図上に単一のピンを立てる（ドラッグでの微調整に対応）共通ヘルパー
+function placeWriteMarker(lat, lng, popupLabel) {
+  if (!leafletMap) return;
+  if (writeMapMarker) leafletMap.removeLayer(writeMapMarker);
+  writeMapMarker = L.marker([lat, lng], {draggable:true}).addTo(leafletMap);
+  if (popupLabel) writeMapMarker.bindPopup(popupLabel).openPopup();
+  leafletMap.setView([lat, lng], 16);
+  writeMapMarker.on('dragend', () => {
+    const p = writeMapMarker.getLatLng();
+    currentLat = p.lat; currentLng = p.lng;
+    reverseGeocodeForWrite(currentLat, currentLng);
+  });
+}
+
+// 緯度経度から住所を逆引きして入力欄に反映する共通ヘルパー
+function reverseGeocodeForWrite(lat, lng) {
+  const tag = document.getElementById('locationTag');
+  const txt = document.getElementById('locationText');
+  tag.style.display = 'inline-flex';
+  txt.textContent = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+  fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`)
+    .then(r=>r.json()).then(d=>{
+      const addr = d.address || {};
+      const str = [addr.prefecture, addr.city||addr.town||addr.village, addr.road, addr.house_number]
+        .filter(Boolean).join('');
+      if (str) document.getElementById('siteAddress').value = str;
+      txt.textContent = str || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+    }).catch(()=>{});
+}
+
+// 住所を入力してピンを立てる（順ジオコーディング）
+function geocodeAddress() {
+  const addr = document.getElementById('siteAddress').value.trim();
+  if (!addr) { showToast('⚠️ 住所を入力してください'); return; }
+  showToast('🔍 住所を検索中…');
+  fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=jp&q=${encodeURIComponent(addr)}`)
+    .then(r => r.json())
+    .then(results => {
+      if (!results.length) { showToast('⚠️ 住所が見つかりませんでした。表記を変えて試してください'); return; }
+      currentLat = parseFloat(results[0].lat);
+      currentLng = parseFloat(results[0].lon);
+      placeWriteMarker(currentLat, currentLng, 'この場所にピンを立てました（ドラッグで微調整できます）');
+      const tag = document.getElementById('locationTag');
+      const txt = document.getElementById('locationText');
+      tag.style.display = 'inline-flex';
+      txt.textContent = addr;
+      showToast('📍 ピンを立てました');
+    })
+    .catch(() => showToast('⚠️ 検索に失敗しました。通信環境をご確認ください'));
 }
 
 // ── Weather ──────────────────────────────────────
