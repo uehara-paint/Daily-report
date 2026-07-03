@@ -745,8 +745,78 @@ let selectedWeather = '';
 let currentLat = null, currentLng = null;
 let leafletMap = null, mainLeafletMap = null;
 
+// ── IndexedDB（写真保存用）─────────────────────────
+// 写真はサイズが大きくlocalStorage(数MB上限)だとすぐ容量オーバーになるため、
+// 現場写真の実データはIndexedDB（数百MB〜使える大容量ストレージ）に保存し、
+// localStorage側には日報の文字情報＋写真枚数だけを持たせる。
+const IDB_NAME = 'uehara_paint_db';
+const IDB_VERSION = 1;
+const IDB_STORE = 'photos';
+
+function idbOpen() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_NAME, IDB_VERSION);
+    req.onupgradeneeded = () => {
+      if (!req.result.objectStoreNames.contains(IDB_STORE)) {
+        req.result.createObjectStore(IDB_STORE);
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function idbSetPhotos(reportId, photosArray) {
+  const db = await idbOpen();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).put(photosArray, reportId);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+async function idbGetPhotos(reportId) {
+  const db = await idbOpen();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readonly');
+    const req = tx.objectStore(IDB_STORE).get(reportId);
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function idbDeletePhotos(reportId) {
+  const db = await idbOpen();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).delete(reportId);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+// 旧バージョンで作られた「写真がlocalStorageに直接入ったままの日報」を
+// 起動時に自動でIndexedDB側へ引っ越しさせる（1回だけ／既に移行済みなら何もしない）
+async function migratePhotosToIDB() {
+  let changed = false;
+  for (const r of reports) {
+    if (Array.isArray(r.photos) && r.photos.length) {
+      try {
+        await idbSetPhotos(r.id, r.photos);
+        r.photoCount = r.photos.length;
+        delete r.photos;
+        changed = true;
+      } catch (err) {
+        console.error('写真の移行に失敗:', r.id, err);
+      }
+    }
+  }
+  if (changed) {
+    try { localStorage.setItem('uehara_reports', JSON.stringify(reports)); }
+    catch (err) { console.error('移行後の保存に失敗:', err); }
+  }
+}
+
 // ── Init ──────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   const d = new Date();
   document.getElementById('workDate').value = d.toISOString().slice(0,10);
   document.getElementById('headerDate').textContent =
@@ -756,6 +826,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('filterMonth').value = m;
 
   loadLeaflet();
+  await migratePhotosToIDB();
   renderHistory();
   renderStats();
 });
@@ -930,14 +1001,17 @@ function renderPhotoGrid() {
 function removePhoto(i) { photos.splice(i,1); renderPhotoGrid(); }
 
 // ── Save ─────────────────────────────────────────
-function saveReport() {
+async function saveReport() {
   const siteName = document.getElementById('siteName').value.trim();
   const workDate = document.getElementById('workDate').value;
   if (!siteName) { showToast('⚠️ 現場名を入力してください'); return; }
   if (!workDate)  { showToast('⚠️ 作業日を入力してください'); return; }
 
+  const reportId = Date.now();
+  const currentPhotos = photos; // 保存対象の写真（この時点のもの）
+
   const report = {
-    id: Date.now(),
+    id: reportId,
     workDate,
     siteName,
     siteAddress: document.getElementById('siteAddress').value,
@@ -954,16 +1028,28 @@ function saveReport() {
     totalArea:   document.getElementById('totalArea').value,
     notes:       document.getElementById('notes').value,
     workers: getWorkers(),
-    photos,
+    photoCount: currentPhotos.length, // 写真本体はIndexedDBへ。localStorageには枚数だけ持つ
     lat: currentLat,
     lng: currentLng,
   };
 
+  // 1) 写真本体をIndexedDBへ保存（容量に余裕があるためここではまず失敗しにくい）
+  if (currentPhotos.length) {
+    try {
+      await idbSetPhotos(reportId, currentPhotos);
+    } catch (err) {
+      showToast('⚠️ 写真の保存に失敗しました。もう一度お試しください');
+      return;
+    }
+  }
+
+  // 2) 日報本体（軽量な文字情報のみ）をlocalStorageへ保存
   reports.unshift(report);
   try {
     localStorage.setItem('uehara_reports', JSON.stringify(reports));
   } catch (err) {
     reports.shift(); // ロールバック
+    if (currentPhotos.length) idbDeletePhotos(reportId);
     showToast('⚠️ 保存容量がいっぱいです。バックアップ保存→古い日報の削除をお願いします');
     return;
   }
@@ -1004,17 +1090,27 @@ function renderHistory() {
         ${r.workers?.length ? `<span class="badge badge-workers">👷 ${r.workers.length}名</span>` : ''}
         ${r.progress ? `<span class="badge badge-progress">進捗 ${r.progress}%</span>` : ''}
         ${r.workType ? `<span class="badge" style="background:#f0f0f0;color:#555">${r.workType}</span>` : ''}
+        ${(r.photoCount || r.photos?.length) ? `<span class="badge" style="background:#fdf6e3;color:#8a6d1f">📸 ${r.photoCount || r.photos.length}枚</span>` : ''}
       </div>
     </div>
   `).join('');
 }
 
 // ── Detail ───────────────────────────────────────
-function showDetail(id) {
+async function showDetail(id) {
   const r = reports.find(x => x.id === id);
   if (!r) return;
   const modal = document.getElementById('detailModal');
   const content = document.getElementById('detailContent');
+
+  // 写真はIndexedDBから取得（旧データにr.photosが残っている場合はそちらを使う）
+  let photosForView = [];
+  try {
+    photosForView = (r.photos && r.photos.length) ? r.photos : await idbGetPhotos(id);
+  } catch (err) {
+    console.error('写真の取得に失敗:', err);
+  }
+
   content.innerHTML = `
     <div class="detail-header">
       <h2>${r.siteName}</h2>
@@ -1052,10 +1148,10 @@ function showDetail(id) {
         <div class="detail-value" style="white-space:pre-wrap">${r.notes}</div>
       </div>` : ''}
     </div>
-    ${r.photos?.length ? `
+    ${photosForView.length ? `
     <div class="card">
       <div class="card-title">📸 現場写真</div>
-      <div class="photo-grid">${r.photos.map(src=>`<img src="${src}" class="photo-thumb">`).join('')}</div>
+      <div class="photo-grid">${photosForView.map(src=>`<img src="${src}" class="photo-thumb">`).join('')}</div>
     </div>` : ''}
     <div style="text-align:right;padding:0 4px 4px">
       <button class="btn btn-sm" style="background:#eaf6ff;color:#1a6ca8;border:none;margin-right:6px" onclick="printOne(${r.id})">🖨️ 印刷</button>
@@ -1076,6 +1172,7 @@ function deleteReport(id) {
   if (!confirm('この日報を削除しますか？')) return;
   reports = reports.filter(r => r.id !== id);
   localStorage.setItem('uehara_reports', JSON.stringify(reports));
+  idbDeletePhotos(id).catch(err => console.error('写真の削除に失敗:', err));
   closeDetail(); renderHistory(); renderStats(); renderMapPage();
   showToast('🗑️ 削除しました');
 }
@@ -1207,10 +1304,14 @@ function printAll() {
 }
 
 // 🖨️ 1件印刷（詳細モーダルから）
-function printOne(id) {
+async function printOne(id) {
   document.getElementById('exportOptions').classList.remove('open');
   const r = reports.find(x=>x.id===id);
   if (!r) return;
+  let photosForPrint = [];
+  try {
+    photosForPrint = (r.photos && r.photos.length) ? r.photos : await idbGetPhotos(id);
+  } catch (err) { console.error('写真の取得に失敗:', err); }
   const sheet = document.getElementById('printSheet');
   const today = new Date().toLocaleDateString('ja-JP');
   sheet.innerHTML = `
@@ -1243,9 +1344,9 @@ function printOne(id) {
     ${r.notes ? `
     <div class="print-section-title">📝 特記事項</div>
     <div class="print-detail">${r.notes}</div>` : ''}
-    ${r.photos?.length ? `
+    ${photosForPrint.length ? `
     <div class="print-section-title">📸 現場写真</div>
-    <div class="print-photos">${r.photos.map(src=>`<img src="${src}">`).join('')}</div>` : ''}
+    <div class="print-photos">${photosForPrint.map(src=>`<img src="${src}">`).join('')}</div>` : ''}
   `;
   window.print();
 }
@@ -1271,12 +1372,22 @@ function exportCSV() {
   showToast('📊 CSVを出力しました');
 }
 
-// 💾 JSONバックアップ
-function exportJSON() {
+// 💾 JSONバックアップ（写真もIndexedDBから取り出して1ファイルにまとめる）
+async function exportJSON() {
   document.getElementById('exportOptions').classList.remove('open');
-  const data = JSON.stringify({ version:1, exported: new Date().toISOString(), reports }, null, 2);
+  showToast('💾 バックアップを作成中…');
+  const reportsWithPhotos = [];
+  for (const r of reports) {
+    let photosData = [];
+    try {
+      photosData = (r.photos && r.photos.length) ? r.photos : await idbGetPhotos(r.id);
+    } catch (err) { console.error('写真の取得に失敗:', r.id, err); }
+    const { photoCount, ...rest } = r;
+    reportsWithPhotos.push({ ...rest, photos: photosData });
+  }
+  const data = JSON.stringify({ version:1, exported: new Date().toISOString(), reports: reportsWithPhotos }, null, 2);
   download(data, `上原塗装_日報バックアップ_${new Date().toISOString().slice(0,10)}.json`, 'application/json');
-  showToast('💾 バックアップを保存しました');
+  showToast('💾 バックアップを保存しました（写真含む）');
 }
 
 // 📂 JSON読込
@@ -1288,7 +1399,7 @@ function doImport(e) {
   const file = e.target.files[0];
   if (!file) return;
   const reader = new FileReader();
-  reader.onload = ev => {
+  reader.onload = async ev => {
     try {
       const data = JSON.parse(ev.target.result);
       const imported = data.reports || data;
@@ -1296,10 +1407,23 @@ function doImport(e) {
       if (!confirm(`${imported.length}件の日報を読み込みます。現在のデータに追加しますか？`)) return;
       const existingIds = new Set(reports.map(r=>r.id));
       const newOnes = imported.filter(r=>!existingIds.has(r.id));
-      reports = [...newOnes, ...reports].sort((a,b)=>b.workDate.localeCompare(a.workDate));
+
+      // 写真本体はIndexedDBへ、localStorageには枚数だけ持たせる
+      const newOnesLight = [];
+      for (const r of newOnes) {
+        const photosData = Array.isArray(r.photos) ? r.photos : [];
+        if (photosData.length) {
+          try { await idbSetPhotos(r.id, photosData); }
+          catch (err) { console.error('写真の保存に失敗:', r.id, err); }
+        }
+        const { photos, ...rest } = r;
+        newOnesLight.push({ ...rest, photoCount: photosData.length });
+      }
+
+      reports = [...newOnesLight, ...reports].sort((a,b)=>b.workDate.localeCompare(a.workDate));
       localStorage.setItem('uehara_reports', JSON.stringify(reports));
       renderHistory(); renderStats();
-      showToast(`✅ ${newOnes.length}件を追加しました`);
+      showToast(`✅ ${newOnesLight.length}件を追加しました`);
     } catch { showToast('⚠️ 読み込みに失敗しました'); }
   };
   reader.readAsText(file);
