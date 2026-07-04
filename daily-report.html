@@ -183,6 +183,18 @@
     transition: all .15s;
   }
   .weather-btn.selected { border-color: var(--gold); background: #fdf6e3; font-weight: 700; }
+  .chip-group-label { font-size: 11px; color: var(--text-sub); font-weight: 600; margin: 8px 0 4px; }
+  .chip-group { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+  .chip-btn {
+    padding: 6px 12px;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    background: var(--surface);
+    font-size: 12px;
+    color: var(--text);
+    cursor: pointer;
+  }
+  .chip-btn.selected { border-color: var(--gold); background: #fdf6e3; font-weight: 700; color: #8a6d1f; }
 
   /* ── Progress bar ── */
   .progress-wrap { margin-bottom: 12px; }
@@ -611,33 +623,37 @@
 
   <div class="card">
     <div class="card-title">🔨 作業内容</div>
-    <label>工種・作業区分</label>
-    <select id="workType">
-      <option value="">選択してください</option>
-      <optgroup label="外壁">
-        <option>外壁 — 高圧洗浄</option>
-        <option>外壁 — 下地処理・補修</option>
-        <option>外壁 — シーラー塗布</option>
-        <option>外壁 — 中塗り</option>
-        <option>外壁 — 上塗り</option>
-        <option>外壁 — コーキング打替え</option>
-      </optgroup>
-      <optgroup label="屋根">
-        <option>屋根 — 高圧洗浄</option>
-        <option>屋根 — 下地処理</option>
-        <option>屋根 — シーラー塗布</option>
-        <option>屋根 — 中塗り</option>
-        <option>屋根 — 上塗り</option>
-      </optgroup>
-      <optgroup label="付帯部">
-        <option>軒天 — 塗装</option>
-        <option>破風・鼻隠し — 塗装</option>
-        <option>雨戸・戸袋 — 塗装</option>
-        <option>シャッター — 塗装</option>
-        <option>鉄部 — 塗装</option>
-      </optgroup>
-      <option>その他</option>
-    </select>
+    <label>工種・作業区分（複数選択可）</label>
+    <div class="chip-group-label">外壁</div>
+    <div class="chip-group">
+      <button type="button" class="chip-btn" onclick="toggleWorkType(this,'外壁 — 高圧洗浄')">高圧洗浄</button>
+      <button type="button" class="chip-btn" onclick="toggleWorkType(this,'外壁 — 下地処理・補修')">下地処理・補修</button>
+      <button type="button" class="chip-btn" onclick="toggleWorkType(this,'外壁 — 下地調整材塗布')">下地調整材塗布</button>
+      <button type="button" class="chip-btn" onclick="toggleWorkType(this,'外壁 — シーラー塗布')">シーラー塗布</button>
+      <button type="button" class="chip-btn" onclick="toggleWorkType(this,'外壁 — プライマー塗布')">プライマー塗布</button>
+      <button type="button" class="chip-btn" onclick="toggleWorkType(this,'外壁 — 中塗り')">中塗り</button>
+      <button type="button" class="chip-btn" onclick="toggleWorkType(this,'外壁 — 上塗り')">上塗り</button>
+      <button type="button" class="chip-btn" onclick="toggleWorkType(this,'外壁 — コーキング打替え')">コーキング打替え</button>
+    </div>
+    <div class="chip-group-label">屋根</div>
+    <div class="chip-group">
+      <button type="button" class="chip-btn" onclick="toggleWorkType(this,'屋根 — 高圧洗浄')">高圧洗浄</button>
+      <button type="button" class="chip-btn" onclick="toggleWorkType(this,'屋根 — 下地処理')">下地処理</button>
+      <button type="button" class="chip-btn" onclick="toggleWorkType(this,'屋根 — プライマー塗布')">プライマー塗布</button>
+      <button type="button" class="chip-btn" onclick="toggleWorkType(this,'屋根 — 中塗り')">中塗り</button>
+      <button type="button" class="chip-btn" onclick="toggleWorkType(this,'屋根 — 上塗り')">上塗り</button>
+    </div>
+    <div class="chip-group-label">付帯部・その他</div>
+    <div class="chip-group" style="margin-bottom:12px">
+      <button type="button" class="chip-btn" onclick="toggleWorkType(this,'軒天 — 塗装')">軒天塗装</button>
+      <button type="button" class="chip-btn" onclick="toggleWorkType(this,'破風・鼻隠し — 塗装')">破風・鼻隠し塗装</button>
+      <button type="button" class="chip-btn" onclick="toggleWorkType(this,'雨戸・戸袋 — 塗装')">雨戸・戸袋塗装</button>
+      <button type="button" class="chip-btn" onclick="toggleWorkType(this,'シャッター — 塗装')">シャッター塗装</button>
+      <button type="button" class="chip-btn" onclick="toggleWorkType(this,'鉄部 — 塗装')">鉄部塗装</button>
+      <button type="button" class="chip-btn" onclick="toggleWorkType(this,'木部 — 塗装')">木部塗装</button>
+      <button type="button" class="chip-btn" onclick="toggleWorkType(this,'建具 — 塗装')">建具塗装</button>
+      <button type="button" class="chip-btn" onclick="toggleWorkType(this,'その他')">その他</button>
+    </div>
     <label>使用塗料・材料</label>
     <input type="text" id="material" placeholder="例：エスケー化研 SKフレッシュ外壁Si 3分艶">
     <label>作業詳細</label>
@@ -746,6 +762,7 @@
 let reports = JSON.parse(localStorage.getItem('uehara_reports') || '[]');
 let photos = [];
 let selectedWeather = '';
+let selectedWorkTypes = [];
 let currentLat = null, currentLng = null;
 let writeMapMarker = null;
 let leafletMap = null, mainLeafletMap = null;
@@ -954,6 +971,16 @@ function selectWeather(btn, val) {
   selectedWeather = val;
 }
 
+// 工種は複数選択可（タップで選択/解除をトグル）
+function toggleWorkType(btn, val) {
+  btn.classList.toggle('selected');
+  if (selectedWorkTypes.includes(val)) {
+    selectedWorkTypes = selectedWorkTypes.filter(v => v !== val);
+  } else {
+    selectedWorkTypes.push(val);
+  }
+}
+
 // ── Progress ─────────────────────────────────────
 function updateProgress(v) {
   document.getElementById('progressLabel').textContent = v + '%';
@@ -1067,7 +1094,7 @@ async function saveReport() {
     weather: selectedWeather,
     temperature: document.getElementById('temperature').value,
     humidity:    document.getElementById('humidity').value,
-    workType:    document.getElementById('workType').value,
+    workType:    selectedWorkTypes.join('、'),
     material:    document.getElementById('material').value,
     workDetail:  document.getElementById('workDetail').value,
     progress:    document.getElementById('progressRange').value,
@@ -1102,6 +1129,8 @@ async function saveReport() {
   }
   photos = [];
   renderPhotoGrid();
+  selectedWorkTypes = [];
+  document.querySelectorAll('.chip-btn.selected').forEach(b => b.classList.remove('selected'));
   renderHistory();
   renderStats();
   showToast('✅ 日報を保存しました');
