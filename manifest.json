@@ -1,0 +1,15 @@
+{
+  "name": "作業日報 | 上原塗装",
+  "short_name": "作業日報",
+  "start_url": "./daily-report.html",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#1e3a5f",
+  "icons": [
+    {
+      "src": "app-icon.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
