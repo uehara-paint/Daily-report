@@ -172,6 +172,23 @@
     flex-shrink: 0;
   }
 
+  /* ── Time segment rows ── */
+  .time-segment-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    background: var(--bg);
+    border-radius: 6px;
+    margin-bottom: 6px;
+  }
+  .time-segment-row input[type=time] { margin-bottom: 0; flex: 1; }
+  .time-segment-row .ts-sep { color: var(--text-sub); font-size: 12px; flex-shrink: 0; }
+  .time-segment-row .ts-remove {
+    background: none; border: none; cursor: pointer;
+    color: var(--danger); font-size: 18px; line-height: 1; flex-shrink: 0;
+  }
+
   /* ── Weather selector ── */
   .weather-btns { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
   .weather-btn {
@@ -556,16 +573,17 @@
     <input type="date" id="workDate">
     <label>現場名</label>
     <input type="text" id="siteName" placeholder="例：笹川邸 外壁塗装">
-    <div class="form-row">
-      <div>
-        <label>開始時刻</label>
-        <input type="time" id="startTime" value="08:00">
-      </div>
-      <div>
-        <label>終了時刻</label>
-        <input type="time" id="endTime" value="17:00">
+    <label>作業時間</label>
+    <div id="timeSegmentList">
+      <div class="time-segment-row" data-idx="0">
+        <input type="time" class="ts-start" value="08:00" oninput="updateTotalTimeDisplay()">
+        <span class="ts-sep">〜</span>
+        <input type="time" class="ts-end" value="17:00" oninput="updateTotalTimeDisplay()">
+        <button type="button" class="ts-remove" onclick="removeTimeSegment(this)">×</button>
       </div>
     </div>
+    <button class="btn btn-outline btn-sm" onclick="addTimeSegment()" style="margin-top:4px" id="addTimeSegmentBtn">＋ 時間帯を追加（天候で中断した時など）</button>
+    <div id="totalTimeDisplay" style="font-size:12px;color:var(--text-sub);margin-top:6px"></div>
   </div>
 
   <div class="card">
@@ -988,6 +1006,107 @@ function updateProgress(v) {
   document.getElementById('progressFill').style.width = v + '%';
 }
 
+// ── Time segments ──────────────────────────────────
+// 天候などで現場を離れ、後で戻った場合に作業時間を分けて記録できるようにする（最大4区間）
+let timeSegmentCount = 1;
+const MAX_TIME_SEGMENTS = 4;
+
+function addTimeSegment() {
+  const list = document.getElementById('timeSegmentList');
+  if (list.children.length >= MAX_TIME_SEGMENTS) {
+    showToast('⚠️ 時間帯は最大4つまでです');
+    return;
+  }
+  timeSegmentCount++;
+  const div = document.createElement('div');
+  div.className = 'time-segment-row';
+  div.dataset.idx = timeSegmentCount;
+  div.innerHTML = `
+    <input type="time" class="ts-start" oninput="updateTotalTimeDisplay()">
+    <span class="ts-sep">〜</span>
+    <input type="time" class="ts-end" oninput="updateTotalTimeDisplay()">
+    <button type="button" class="ts-remove" onclick="removeTimeSegment(this)">×</button>
+  `;
+  list.appendChild(div);
+  updateAddTimeSegmentBtn();
+  updateTotalTimeDisplay();
+}
+
+function removeTimeSegment(btn) {
+  const list = document.getElementById('timeSegmentList');
+  if (list.children.length <= 1) {
+    showToast('⚠️ 時間帯は最低1つ必要です');
+    return;
+  }
+  btn.closest('.time-segment-row').remove();
+  updateAddTimeSegmentBtn();
+  updateTotalTimeDisplay();
+}
+
+function updateAddTimeSegmentBtn() {
+  const list = document.getElementById('timeSegmentList');
+  const addBtn = document.getElementById('addTimeSegmentBtn');
+  if (addBtn) addBtn.style.display = list.children.length >= MAX_TIME_SEGMENTS ? 'none' : '';
+}
+
+function getTimeSegments() {
+  return Array.from(document.querySelectorAll('#timeSegmentList .time-segment-row')).map(row => ({
+    start: row.querySelector('.ts-start').value,
+    end: row.querySelector('.ts-end').value,
+  })).filter(seg => seg.start || seg.end);
+}
+
+function resetTimeSegments() {
+  const list = document.getElementById('timeSegmentList');
+  list.innerHTML = `
+    <div class="time-segment-row" data-idx="0">
+      <input type="time" class="ts-start" value="08:00" oninput="updateTotalTimeDisplay()">
+      <span class="ts-sep">〜</span>
+      <input type="time" class="ts-end" value="17:00" oninput="updateTotalTimeDisplay()">
+      <button type="button" class="ts-remove" onclick="removeTimeSegment(this)">×</button>
+    </div>
+  `;
+  timeSegmentCount = 1;
+  updateAddTimeSegmentBtn();
+  updateTotalTimeDisplay();
+}
+
+function segMinutes(seg) {
+  if (!seg.start || !seg.end) return 0;
+  const [sh, sm] = seg.start.split(':').map(Number);
+  const [eh, em] = seg.end.split(':').map(Number);
+  let mins = (eh * 60 + em) - (sh * 60 + sm);
+  if (mins < 0) mins += 24 * 60; // 日跨ぎの入力保険
+  return mins;
+}
+
+function totalMinutes(segments) {
+  return (segments || []).reduce((sum, s) => sum + segMinutes(s), 0);
+}
+
+function formatMinutes(mins) {
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return `${h}時間${m}分`;
+}
+
+function formatSegments(segments) {
+  if (!segments || !segments.length) return '';
+  return segments.map(s => `${s.start || '?'}〜${s.end || '?'}`).join('、');
+}
+
+// 旧データ（timeSegmentsが無くstartTime/endTimeのみ）との互換用
+function reportTimeSegments(r) {
+  if (r.timeSegments && r.timeSegments.length) return r.timeSegments;
+  if (r.startTime || r.endTime) return [{ start: r.startTime, end: r.endTime }];
+  return [];
+}
+
+function updateTotalTimeDisplay() {
+  const segs = getTimeSegments();
+  const el = document.getElementById('totalTimeDisplay');
+  el.textContent = segs.length ? `実働時間合計：${formatMinutes(totalMinutes(segs))}` : '';
+}
+
 // ── Workers ──────────────────────────────────────
 let workerCount = 1;
 function addWorker() {
@@ -1090,8 +1209,7 @@ async function saveReport() {
     workDate,
     siteName,
     siteAddress: document.getElementById('siteAddress').value,
-    startTime: document.getElementById('startTime').value,
-    endTime:   document.getElementById('endTime').value,
+    timeSegments: getTimeSegments(),
     weather: selectedWeather,
     temperature: document.getElementById('temperature').value,
     humidity:    document.getElementById('humidity').value,
@@ -1132,6 +1250,7 @@ async function saveReport() {
   renderPhotoGrid();
   selectedWorkTypes = [];
   document.querySelectorAll('.chip-btn.selected').forEach(b => b.classList.remove('selected'));
+  resetTimeSegments();
   renderHistory();
   renderStats();
   showToast('✅ 日報を保存しました');
@@ -1164,6 +1283,7 @@ function renderHistory() {
       <div style="font-size:12px;color:var(--text-sub);margin-top:2px">${r.siteAddress||''}</div>
       <div class="report-item-meta">
         ${r.weather ? `<span class="badge badge-weather">${r.weather}</span>` : ''}
+        ${reportTimeSegments(r).length ? `<span class="badge" style="background:#f0eaff;color:#5a3ea8">⏱️ ${formatMinutes(totalMinutes(reportTimeSegments(r)))}${reportTimeSegments(r).length>1?`（${reportTimeSegments(r).length}区間）`:''}</span>` : ''}
         ${r.workers?.length ? `<span class="badge badge-workers">👷 ${r.workers.length}名</span>` : ''}
         ${r.progress ? `<span class="badge badge-progress">進捗 ${r.progress}%</span>` : ''}
         ${r.workType ? `<span class="badge" style="background:#f0f0f0;color:#555">${r.workType}</span>` : ''}
@@ -1191,7 +1311,7 @@ async function showDetail(id) {
   content.innerHTML = `
     <div class="detail-header">
       <h2>${r.siteName}</h2>
-      <div class="sub">${r.workDate}　${r.startTime||''}〜${r.endTime||''}</div>
+      <div class="sub">${r.workDate}　${formatSegments(reportTimeSegments(r)) || '—'}${reportTimeSegments(r).length ? `（実働 ${formatMinutes(totalMinutes(reportTimeSegments(r)))}）` : ''}</div>
       ${r.siteAddress ? `<div class="sub" style="margin-top:4px">📍 ${r.siteAddress}</div>` : ''}
     </div>
     ${r.lat && r.lng ? `<div id="detailMap" style="height:180px;border-radius:8px;overflow:hidden;margin-bottom:10px"></div>` : ''}
@@ -1403,7 +1523,7 @@ async function printOne(id, customerMode = false) {
     <div class="print-grid">
       <div class="print-cell"><div class="print-cell-label">作業日</div><div class="print-cell-value">${r.workDate}</div></div>
       <div class="print-cell"><div class="print-cell-label">現場名</div><div class="print-cell-value">${r.siteName}</div></div>
-      <div class="print-cell"><div class="print-cell-label">作業時間</div><div class="print-cell-value">${r.startTime||''}〜${r.endTime||''}</div></div>
+      <div class="print-cell"><div class="print-cell-label">作業時間（実働 ${formatMinutes(totalMinutes(reportTimeSegments(r)))}）</div><div class="print-cell-value">${formatSegments(reportTimeSegments(r)) || '—'}</div></div>
       <div class="print-cell"><div class="print-cell-label">天気</div><div class="print-cell-value">${r.weather||'—'}</div></div>
       <div class="print-cell"><div class="print-cell-label">気温</div><div class="print-cell-value">${r.temperature?r.temperature+'℃':'—'}</div></div>
       <div class="print-cell"><div class="print-cell-label">湿度</div><div class="print-cell-value">${r.humidity?r.humidity+'%':'—'}</div></div>
@@ -1433,17 +1553,20 @@ async function printOne(id, customerMode = false) {
 function exportCSV() {
   document.getElementById('exportOptions').classList.remove('open');
   const BOM = '\uFEFF';
-  const header = ['作業日','現場名','住所','開始','終了','天気','気温(℃)','湿度(%)','工種','使用塗料','進捗(%)','施工面積(㎡)','累計面積(㎡)','作業員','作業内容','特記事項'];
-  const rows = reports.map(r => [
-    r.workDate, r.siteName, r.siteAddress||'',
-    r.startTime||'', r.endTime||'',
-    r.weather||'', r.temperature||'', r.humidity||'',
-    r.workType||'', r.material||'',
-    r.progress||0, r.area||'', r.totalArea||'',
-    r.workers?.map(w=>w.name).join('／')||'',
-    (r.workDetail||'').replace(/\n/g,' '),
-    (r.notes||'').replace(/\n/g,' ')
-  ].map(v => `"${String(v).replace(/"/g,'""')}"`));
+  const header = ['作業日','現場名','住所','作業時間','実働時間','天気','気温(℃)','湿度(%)','工種','使用塗料','進捗(%)','施工面積(㎡)','累計面積(㎡)','作業員','作業内容','特記事項'];
+  const rows = reports.map(r => {
+    const segs = reportTimeSegments(r);
+    return [
+      r.workDate, r.siteName, r.siteAddress||'',
+      formatSegments(segs), segs.length ? formatMinutes(totalMinutes(segs)) : '',
+      r.weather||'', r.temperature||'', r.humidity||'',
+      r.workType||'', r.material||'',
+      r.progress||0, r.area||'', r.totalArea||'',
+      r.workers?.map(w=>w.name).join('／')||'',
+      (r.workDetail||'').replace(/\n/g,' '),
+      (r.notes||'').replace(/\n/g,' ')
+    ].map(v => `"${String(v).replace(/"/g,'""')}"`);
+  });
 
   const csv = BOM + [header.map(h=>`"${h}"`), ...rows].map(r=>r.join(',')).join('\n');
   download(csv, `上原塗装_日報_${new Date().toISOString().slice(0,10)}.csv`, 'text/csv');
