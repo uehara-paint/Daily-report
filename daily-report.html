@@ -610,11 +610,12 @@
   <div class="card">
     <div class="card-title">🌤️ 天気・気温</div>
     <div class="weather-btns">
-      <button class="weather-btn" onclick="selectWeather(this,'☀️ 晴れ')">☀️ 晴れ</button>
-      <button class="weather-btn" onclick="selectWeather(this,'⛅ 曇り')">⛅ 曇り</button>
-      <button class="weather-btn" onclick="selectWeather(this,'🌧️ 雨')">🌧️ 雨</button>
-      <button class="weather-btn" onclick="selectWeather(this,'🌨️ 雪')">🌨️ 雪</button>
-      <button class="weather-btn" onclick="selectWeather(this,'💨 強風')">💨 強風</button>
+      <button class="weather-btn" onclick="toggleWeather(this,'☀️ 晴れ')">☀️ 晴れ</button>
+      <button class="weather-btn" onclick="toggleWeather(this,'⛅ 曇り')">⛅ 曇り</button>
+      <button class="weather-btn" onclick="toggleWeather(this,'🌦️ 時々雨')">🌦️ 時々雨</button>
+      <button class="weather-btn" onclick="toggleWeather(this,'🌧️ 雨')">🌧️ 雨</button>
+      <button class="weather-btn" onclick="toggleWeather(this,'🌨️ 雪')">🌨️ 雪</button>
+      <button class="weather-btn" onclick="toggleWeather(this,'💨 強風')">💨 強風</button>
     </div>
     <div class="form-row">
       <div>
@@ -984,10 +985,16 @@ function geocodeAddress() {
 }
 
 // ── Weather ──────────────────────────────────────
-function selectWeather(btn, val) {
-  document.querySelectorAll('.weather-btn').forEach(b=>b.classList.remove('selected'));
-  btn.classList.add('selected');
-  selectedWeather = val;
+// 「晴れ」＋「時々雨」のように組み合わせて選べるよう複数選択式にしている
+let selectedWeathers = [];
+function toggleWeather(btn, val) {
+  btn.classList.toggle('selected');
+  if (selectedWeathers.includes(val)) {
+    selectedWeathers = selectedWeathers.filter(v => v !== val);
+  } else {
+    selectedWeathers.push(val);
+  }
+  selectedWeather = selectedWeathers.join('、');
 }
 
 // 工種は複数選択可（タップで選択/解除をトグル）
@@ -1250,6 +1257,9 @@ async function saveReport() {
   renderPhotoGrid();
   selectedWorkTypes = [];
   document.querySelectorAll('.chip-btn.selected').forEach(b => b.classList.remove('selected'));
+  selectedWeathers = [];
+  selectedWeather = '';
+  document.querySelectorAll('.weather-btn.selected').forEach(b => b.classList.remove('selected'));
   resetTimeSegments();
   renderHistory();
   renderStats();
@@ -1523,7 +1533,7 @@ async function printOne(id, customerMode = false) {
     <div class="print-grid">
       <div class="print-cell"><div class="print-cell-label">作業日</div><div class="print-cell-value">${r.workDate}</div></div>
       <div class="print-cell"><div class="print-cell-label">現場名</div><div class="print-cell-value">${r.siteName}</div></div>
-      <div class="print-cell"><div class="print-cell-label">作業時間（実働 ${formatMinutes(totalMinutes(reportTimeSegments(r)))}）</div><div class="print-cell-value">${formatSegments(reportTimeSegments(r)) || '—'}</div></div>
+      <div class="print-cell"><div class="print-cell-label">作業時間</div><div class="print-cell-value">${formatSegments(reportTimeSegments(r)) || '—'}</div></div>
       <div class="print-cell"><div class="print-cell-label">天気</div><div class="print-cell-value">${r.weather||'—'}</div></div>
       <div class="print-cell"><div class="print-cell-label">気温</div><div class="print-cell-value">${r.temperature?r.temperature+'℃':'—'}</div></div>
       <div class="print-cell"><div class="print-cell-label">湿度</div><div class="print-cell-value">${r.humidity?r.humidity+'%':'—'}</div></div>
