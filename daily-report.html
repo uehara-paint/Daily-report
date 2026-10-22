@@ -673,6 +673,8 @@
       <button type="button" class="chip-btn" onclick="toggleWorkType(this,'鉄部 — 塗装')">鉄部塗装</button>
       <button type="button" class="chip-btn" onclick="toggleWorkType(this,'木部 — 塗装')">木部塗装</button>
       <button type="button" class="chip-btn" onclick="toggleWorkType(this,'建具 — 塗装')">建具塗装</button>
+      <button type="button" class="chip-btn" onclick="toggleWorkType(this,'サッシ — 塗装')">サッシ塗装</button>
+      <button type="button" class="chip-btn" onclick="toggleWorkType(this,'窓枠 — 塗装')">窓枠塗装</button>
       <button type="button" class="chip-btn" onclick="toggleWorkType(this,'その他')">その他</button>
     </div>
     <label>使用塗料・材料</label>
@@ -787,6 +789,9 @@ let selectedWorkTypes = [];
 let currentLat = null, currentLng = null;
 let writeMapMarker = null;
 let leafletMap = null, mainLeafletMap = null;
+// 地図の既定表示位置：新潟県上越市清里区武士
+const DEFAULT_MAP_LAT = 37.0790;
+const DEFAULT_MAP_LNG = 138.3168;
 
 // ── IndexedDB（写真保存用）─────────────────────────
 // 写真はサイズが大きくlocalStorage(数MB上限)だとすぐ容量オーバーになるため、
@@ -885,7 +890,8 @@ function loadLeaflet() {
   js.src = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js';
   js.onload = () => {
     initWriteMap();
-    getCurrentLocation();
+    // 起動時に現在地へは飛ばさず、既定の位置（上越市清里区武士）を表示する。
+    // 現在地が必要なときは「📡 現在地を取得」ボタンを押す。
   };
   document.head.appendChild(js);
 }
@@ -893,8 +899,8 @@ function loadLeaflet() {
 function initWriteMap() {
   const c = document.getElementById('map-container');
   document.getElementById('mapPlaceholder').style.display = 'none';
-  const lat = 37.15, lng = 138.24; // 上越市
-  leafletMap = L.map('map').setView([lat, lng], 13);
+  const lat = DEFAULT_MAP_LAT, lng = DEFAULT_MAP_LNG; // 上越市清里区武士
+  leafletMap = L.map('map').setView([lat, lng], 14);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap'}).addTo(leafletMap);
   // 地図タップで手動ピン設置（住所検索や現在地の微調整用）
   leafletMap.on('click', e => {
@@ -908,8 +914,8 @@ function initWriteMap() {
 function initMainMap() {
   const el = document.getElementById('mainMapContainer');
   el.innerHTML = '<div id="mainMap" style="width:100%;height:100%"></div>';
-  const lat = 37.15, lng = 138.24;
-  mainLeafletMap = L.map('mainMap').setView([lat, lng], 11);
+  const lat = DEFAULT_MAP_LAT, lng = DEFAULT_MAP_LNG;
+  mainLeafletMap = L.map('mainMap').setView([lat, lng], 12);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap'}).addTo(mainLeafletMap);
   renderMapMarkers();
 }
@@ -1456,7 +1462,7 @@ async function printOne(id, customerMode = false) {
 // 📊 CSV出力
 function exportCSV() {
   document.getElementById('exportOptions').classList.remove('open');
-  const BOM = '\uFEFF';
+  const BOM = '﻿';
   const header = ['作業日','現場名','住所','開始','終了','天気','気温(℃)','湿度(%)','工種','使用塗料','進捗(%)','施工面積(㎡)','累計面積(㎡)','作業員','作業内容','特記事項'];
   const rows = reports.map(r => [
     r.workDate, r.siteName, r.siteAddress||'',
